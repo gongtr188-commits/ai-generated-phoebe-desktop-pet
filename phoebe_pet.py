@@ -41,8 +41,25 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QMenu, QAction,
                              QSlider, QWidgetAction)
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# PyInstaller --onefile 打包后在临时目录解压素材，frozen 时用 sys._MEIPASS
+if getattr(sys, 'frozen', False):
+    BASE = sys._MEIPASS
+else:
+    BASE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(BASE, "assets")
+
+# 如果存在 data.pak，自动解压到临时目录（隐藏素材，避免 GitHub 上直接被浏览）
+_PAK = os.path.join(BASE, "data.pak")
+if os.path.isfile(_PAK):
+    import tempfile, zipfile, shutil as _shutil
+    _PAK_TEMP = os.path.join(tempfile.gettempdir(), "phoebe_pet_assets")
+    if not os.path.isdir(_PAK_TEMP) or not os.path.isdir(os.path.join(_PAK_TEMP, "poses")):
+        if os.path.isdir(_PAK_TEMP):
+            _shutil.rmtree(_PAK_TEMP)
+        os.makedirs(_PAK_TEMP)
+        with zipfile.ZipFile(_PAK, "r") as _zf:
+            _zf.extractall(_PAK_TEMP)
+    ASSETS = _PAK_TEMP
 
 FPS_MS = 80              # 动画帧间隔(素材 24fps 抽 1/2 帧 => 12fps)
 WALK_SPEED = 3           # 行走像素/帧
@@ -1353,6 +1370,14 @@ class PhoebePet(QWidget):
     def closeEvent(self, e):
         if self.hat_widget:
             self.hat_widget.close()
+        # 清理 .pak 解压出来的临时素材目录
+        try:
+            import tempfile, shutil
+            _PT = os.path.join(tempfile.gettempdir(), "phoebe_pet_assets")
+            if os.path.isdir(_PT):
+                shutil.rmtree(_PT)
+        except:
+            pass
         super().closeEvent(e)
 
     def _try_reattach_hat(self, hat: HatWidget) -> bool:

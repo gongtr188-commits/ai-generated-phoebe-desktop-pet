@@ -11,7 +11,7 @@ import os
 import sys
 import zipfile
 
-EXCLUDE_DIRS = {"菲比-素材", "__pycache__"}
+EXCLUDE_DIRS = {"菲比-素材", "__pycache__", "assets"}
 EXCLUDE_FILES = {"_preview.png"}
 
 # 打包时自动生成给最终用户看的说明(记事本可直接打开)
