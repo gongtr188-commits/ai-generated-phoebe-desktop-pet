@@ -641,53 +641,176 @@ All 500 assets were generated from raw video frames and static screenshots via `
 
 全部 500 个素材由 `tools/matting.py` 从原始视频帧和截图中生成。核心难点：**白色衣服 + 白色背景**——简单色键抠图会吃掉衣服。
 
+---
+
+#### 10.1 Why Not Color-Keying · 为什么不能用色键
+
+A naive approach would be: "if a pixel is close to white, make it transparent." This fails catastrophically because Phoebe's dress, hat, and skin highlights are also white — color-keying would punch holes through the character.
+
+简单方案"接近白色就变透明"会灾难性地失败——菲比的裙子、帽子、皮肤高光全是白色，色键会把她打成筛子。
+
+The solution: **edge-growing flood-fill**. Instead of deciding per-pixel by color, start from the image borders (which are guaranteed to be background) and "flood" inward — but stop wherever you hit a dark outline pixel. Anything never reached by the flood is foreground.
+
+解决思路：**从边缘泛洪**。不逐像素判颜色，而是从图像四边（一定是背景）开始往内"灌水"，遇到深色轮廓线就停。水没淹到的地方就是前景。
+
+---
+
+#### 10.2 Full Pipeline · 完整流程
+
 ```
-Source image (BGR, ~229-254 white-ish background)
+Source image (BGR, background ~229-254, compressed video noise)
         │
         ▼
-┌─ Step 1: Exposure normalization ─────────────────────────────┐
-│  bg_level() samples 6px border → median min-channel          │
-│  gain = 255 / bg_level  →  video frames brightened to 255   │
+┌─ Step 1: Exposure normalization · 曝光归一 ──────────────────┐
+│  bg_level() samples 6px border → median of min(R,G,B)       │
+│  gain = 255.0 / bg_level  →  video frames brightened to 255 │
+│  Why: video frames are darker (bg≈229) than static shots    │
+│       (bg≈250). Without gain, thresholds differ per source. │
+│  为什么：视频帧背景偏暗(~229)，静态图较亮(~250)。           │
+│  不加增益会导致不同素材的参数不一致，抠图结果忽好忽坏。     │
+│                                                              │
+│  def bg_level(bgr, t=6):                                     │
+│      b = concat(bgr[:t], bgr[-t:], bgr[:,:t], bgr[:,-t:])  │
+│      return median(b.min(axis=1))  # min channel = darkest  │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ Step 2: Barrier detection ──────────────────────────────────┐
+┌─ Step 2: Barrier detection · 屏障检测 ───────────────────────┐
 │  channel_diff = max(R,G,B) - min(R,G,B)                     │
-│  barrier = channel_diff > 22  → colored pixels (eyes, hair) │
-│  These pixels CANNOT be flooded — they form the "wall"      │
+│  barrier = channel_diff > 22                                 │
+│                                                              │
+│  A pixel where R≈G≈B has low diff — it's gray/white.        │
+│  A pixel where e.g. R=200, B=30 has high diff — it's COLOR. │
+│  Dark outlines, eye colors, hair highlights all have         │
+│  channel_diff > 22. These pixels are marked as "walls" —    │
+│  the flood-fill must NEVER pass through them.                │
+│                                                              │
+│  通道差 = max(R,G,B) - min(R,G,B)                           │
+│  R≈G≈B → 差值低 → 灰白色（背景/白衣服）                    │
+│  R,G,B 差距大 → 差值高 → 彩色（轮廓线/眼睛/头发）          │
+│  channel_diff > 22 的像素标记为"墙"，洪水不可穿越。         │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ Step 3: Flood-fill from edges ─────────────────────────────┐
-│  Seeds: every 24px along all 4 borders                      │
-│  Condition: pixel.channel_diff ≤ 18 AND brightness ≥ 180    │
-│  Flood: adjacent pixel diff ≤ 8 (per-channel tolerance)     │
-│  Result: flood_mask (255=background, 0=foreground)          │
+┌─ Step 3: Flood-fill from edges · 边缘泛洪 ───────────────────┐
+│  Seeds: every 24px along all 4 borders                       │
+│  Seed condition: channel_diff ≤ 18 AND brightness ≥ 180     │
+│  Flood condition: neighbor pixel diff ≤ 8 (per-channel)     │
+│  cv2.FLOODFILL_MASK_ONLY → flood updates mask, not image    │
+│                                                              │
+│  Why seeds every 24px: borders are mostly background,       │
+│  but a character pixel might sit right on the edge.          │
+│  24px spacing ensures at least one seed lands in background. │
+│                                                              │
+│  Why tolerance=8: video compression creates gradient bands   │
+│  on the "white" background. Tolerance 8 lets the flood       │
+│  climb these gentle gradients without leaking through        │
+│  the dark outline (where the jump is >22, far beyond 8).    │
+│                                                              │
+│  种子：四边每隔 24px 撒一个                                │
+│  种子条件：通道差≤18 且 亮度≥180（确保种子在背景上）       │
+│  泛洪条件：相邻像素逐通道差≤8                               │
+│                                                              │
+│  为什么 24px 间隔：四边大概率是背景，但偶尔人物边缘          │
+│  会碰到边框，24px 间隔确保至少有一颗种子落在纯背景上。      │
+│                                                              │
+│  为什么容差=8：视频压缩在"白色"背景上产生渐变色带，         │
+│  容差 8 让洪水能爬过这些平缓过渡，但穿不过深色轮廓线        │
+│  （轮廓线颜色跳变>22，远大于 8）。                           │
+│                                                              │
+│  def build_alpha(bgr):                                       │
+│      mask = zeros((h+2, w+2))  # +2 for OpenCV floodFill    │
+│      mask[1:-1, 1:-1][barrier] = 1  # walls never flooded   │
+│      for seed in edge_seeds:                                 │
+│          cv2.floodFill(bgr, mask, seed, (255,255,255),      │
+│                        lo=(8,8,8), up=(8,8,8),              │
+│                        flags=FLOODFILL_MASK_ONLY | 255<<8)  │
+│      alpha = 255 where mask != 255 else 0   # invert mask   │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ Step 4: Denoising ─────────────────────────────────────────┐
-│  connectedComponentsWithStats → largest blob = character    │
-│  Delete blobs < 1% of largest area (stray noise pixels)    │
+┌─ Step 4: Denoising · 降噪 ───────────────────────────────────┐
+│  cv2.connectedComponentsWithStats(alpha, connectivity=8)     │
+│  → Find the largest connected blob (the character)           │
+│  → Delete any blob < 1% of largest area                     │
+│                                                              │
+│  Why: after flood-fill, small isolated "islands" of alpha   │
+│  may remain — stray noise pixels, compression artifacts,     │
+│  semi-transparent watermarks in the corner. The 1% rule      │
+│  removes everything that isn't the main character body.      │
+│                                                              │
+│  连通域分析：找到面积最大的连通块（角色本身）                │
+│  删除面积不足最大块 1% 的孤立噪点                            │
+│                                                              │
+│  泛洪后可能残留孤立的 alpha 小岛——噪点、压缩伪影、          │
+│  角落的半透明水印。1% 阈值清除所有非主体的零散像素。        │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ Step 5: Edge refinement ───────────────────────────────────┐
-│  cv2.erode(3×3) → remove 1px white fringe                   │
-│  cv2.GaussianBlur(3×3) → feather edges, eliminate aliasing │
+┌─ Step 5: Edge refinement · 边缘精修 ─────────────────────────┐
+│  cv2.erode(3×3, iterations=1) → shave off 1px white fringe │
+│  cv2.GaussianBlur(3×3, sigma=0) → feather edges             │
+│                                                              │
+│  Without erode: a 1px ring of semi-transparent white pixels │
+│  clings to the character edge — leftover from the flood-fill │
+│  boundary where background and outline mix. Erode fixes it. │
+│                                                              │
+│  Without blur: hard alpha edges cause visible aliasing       │
+│  ("jaggies") when rendered on dark wallpaper.                │
+│                                                              │
+│  erode 3×3 向内收 1px → 去掉泛洪边界残留的白边              │
+│  GaussianBlur 3×3 → 羽化边缘，消除深色壁纸上的锯齿感        │
 └──────────────────────────────────────────────────────────────┘
         │
         ▼
-┌─ Step 6: Canvas normalization ──────────────────────────────┐
-│  Scale to CHAR_H=440px uniform height                       │
-│  Bottom-align on CANVAS_H=480 canvas                        │
-│  Output: BGRA PNG with clean alpha channel                  │
+┌─ Step 6: Canvas normalization · 画布归一 ────────────────────┐
+│  Scale to CHAR_H=440px uniform character height              │
+│  Bottom-align on CANVAS_H=480px canvas (BASELINE=6px gap)   │
+│  MARGIN_W=12px horizontal padding                            │
+│  Output: BGRA PNG with clean alpha channel                   │
+│                                                              │
+│  For static poses: scale factor k = CHAR_H / front_pose_h   │
+│  (all poses use the same k to preserve natural height diff)  │
+│                                                              │
+│  For video animations: unified bounding box across ALL       │
+│  frames (to preserve inter-frame motion), then scale by      │
+│  k = CHAR_H / median(frame_heights)                          │
+│                                                              │
+│  统一缩放到角色站立高度 440px                                │
+│  底部对齐于 480px 画布（底部留 6px 空隙）                   │
+│                                                              │
+│  静态姿势：以正面站立高度为基准，所有姿势同比例缩放          │
+│  视频动画：所有帧取统一包围盒，高度取中位数归一              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight · 核心洞察**: The character's dark outlines (ink/shadows) have high channel variance (>22), while the near-white background has low variance (≤18). The flood-fill from edges crawls through the background but **stops at the outline** — the barrier pixels form an impassable wall. This is why the white dress survives the process: it's fully enclosed by the dark outline.
+---
+
+#### 10.3 Parameter Table · 参数一览
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `FLOOD_TOL` | 8 | Per-channel max diff for flood to advance · 泛洪相邻像素逐通道容差 |
+| `SEED_MIN` | 180 | Seed pixel must be brighter than this · 种子像素最低亮度 |
+| `SEED_DIFF` | 18 | Seed pixel channel_diff must be ≤ this (must be near-gray) · 种子通道差上限（必须接近灰白） |
+| Barrier diff | >22 | Pixels with channel_diff > 22 are walls · 通道差 >22 = 墙，永不淹没 |
+| `FRAME_STEP` | 2 | Extract every N-th video frame (24fps → 12fps) · 视频抽帧间隔 |
+| Seed spacing | 24px | Distance between flood-fill seeds along border · 边缘种子间距 |
+| Denoise threshold | 1% | Blobs < 1% of largest area are deleted · 小于最大块 1% 的连通域删除 |
+| `CHAR_H` | 440px | Target character standing height · 目标人物站立高度 |
+| `CANVAS_H` | 480px | Output canvas height (room for hat/jump) · 画布高度（给帽子和跳跃留空间） |
+
+---
+
+#### 10.4 Key Insight · 核心洞察
+
+The character's dark outlines (ink/shadows) have high channel variance (>22), while the near-white background has low variance (≤18). The flood-fill from edges crawls through the background but **stops at the outline** — the barrier pixels form an impassable wall. This is why the white dress survives the process: it's fully enclosed by the dark outline.
 
 角色的深色轮廓线（墨线/阴影）有很高的通道方差（>22），而近白色的背景方差很低（≤18）。从边缘开始的泛洪沿背景爬行，**遇到轮廓线就停**——屏障像素构成不可逾越的墙。这就是为什么白色裙子能完整保留：它被深色轮廓完全包裹住了。
+
+> **The flood-fill doesn't know what a "dress" is — it only knows it can't cross dark lines. The dress is safe because the outline artist drew it that way.**
+>
+> **泛洪算法不知道什么是"裙子"——它只知道深色线不能过。裙子能保留，是因为画师已经用轮廓线把它圈起来了。**
 
 ---
 
