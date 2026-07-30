@@ -19,10 +19,9 @@
 <p align="center">
   <b>🎬 Demo · 演示视频</b><br>
   <sub>Click to watch Phoebe in action · 点击观看菲比实际效果</sub><br><br>
-  <a href="demo.mp4">
-    <img src="preview.png" alt="Watch Demo · 观看演示" width="500">
-  </a><br>
-  <sub>▶ <a href="demo.mp4"><b>Click to play · 点击播放</b></a></sub>
+  <video src="demo.mp4" width="650" controls poster="preview.png">
+    Your browser does not support video playback. View the <a href="demo.mp4">video file</a> instead.
+  </video>
 </p>
 
 ---
