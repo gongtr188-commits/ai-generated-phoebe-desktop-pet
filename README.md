@@ -28,6 +28,7 @@
 - [🚀 Quick Start · 快速开始](#-quick-start--快速开始)
 - [📂 Project Structure · 项目结构](#-project-structure--项目结构)
 - [🛠️ Tech Stack · 技术栈](#️-tech-stack--技术栈)
+- [🔬 Technical Deep Dive · 技术实现详解](#-technical-deep-dive--技术实现详解)
 - [📝 AI Generation · AI 生成说明](#-ai-generation--ai-生成说明)
 - [🐛 FAQ · 常见问题](#-faq--常见问题)
 - [📄 License · 许可证](#-license--许可证)
@@ -267,7 +268,397 @@ tools/
 | **State Machine** 状态机 | Custom Python | 9 states with interrupt-safe transitions; nearest-path rotation from any angle; action chaining |
 | **Physics** 物理模拟 | Custom | Parabolic hat trajectory (gravity=2.0px/frame²), proportional-approach follow-mouse damping |
 | **Image Matting** 抠图 | OpenCV | Edge-growing flood-fill, tolerance=8, channel-diff barrier >22 |
-| **Packaging** 打包 | PyInstaller + zipfile | `--onefile` EXE with `sys._MEIPASS`, zip source release, GitHub Releases |
+| **Packaging** 打包 | PyInstaller + zipfile | `--onefile` EXE with `sys._MEIPASS` frozen path · zip source release, GitHub Releases API · auto-extract `data.pak` to temp |
+
+---
+
+## 🔬 Technical Deep Dive · 技术实现详解
+
+> This section explains the architectural decisions, algorithms, and engineering patterns behind each major feature. For full source code, see [`phoebe_pet.py`](phoebe_pet.py).
+>
+> 本节详解各核心功能背后的架构设计、算法原理与工程实践。完整源码见 [`phoebe_pet.py`](phoebe_pet.py)。
+
+---
+
+### 1. Frameless Transparent Window · 无边框透明窗口
+
+The foundational layer: a pixel-transparent, always-on-top, focus-avoiding overlay.
+
+底层基石：逐像素透明、始终置顶、不抢焦点的悬浮窗。
+
+```python
+self.setWindowFlags(
+    Qt.FramelessWindowHint      # No title bar, no borders · 无标题栏无边框
+    | Qt.WindowStaysOnTopHint   # Always above other windows · 始终置顶
+    | Qt.SubWindow              # No taskbar entry · 不出现在任务栏
+    | Qt.WindowDoesNotAcceptFocus  # Never steal keyboard focus · 不抢焦点
+)
+self.setAttribute(Qt.WA_TranslucentBackground)  # Alpha channel passthrough · 透明穿透
+```
+
+**Why these specific flags**: `SubWindow` prevents a taskbar entry (the pet isn't an "app"). `WindowDoesNotAcceptFocus` ensures clicking Phoebe never steals focus from your actual work. The `WA_TranslucentBackground` attribute tells Qt to respect the PNG alpha channel rather than painting a solid color behind pixels.
+
+---
+
+### 2. Animation Frame System · 帧动画系统
+
+**Pipeline**: Source video (24fps MP4) → OpenCV frame extraction (FRAME_STEP=2, yielding 12fps) → Per-frame flood-fill matting → PNG output → Runtime QPixmap loading with on-demand scaling.
+
+**管线**：源视频 (24fps MP4) → OpenCV 抽帧 (FRAME_STEP=2 → 12fps) → 逐帧泛洪抠图 → PNG 输出 → 运行时 QPixmap 加载 + 按需缩放。
+
+```
+Source 24fps MP4  →  [cv2.VideoCapture, FRAME_STEP=2]
+  ↓
+12fps raw frames  →  [matte(): flood-fill → BGRA]  →  [to_canvas(): size-normalized PNG]
+  ↓
+assets/anim/*/*.png  →  [QPixmap(file)]  →  _raw_anims dict (original resolution)
+  ↓
+Runtime display   →  [pose_pix() / frame_pix(): scaledToHeight(h, SmoothTransformation)]
+  ↓                  [LRU cache: _pose_cache, _frame_cache — invalidated on resize]
+```
+
+**Key optimization · 关键优化**:
+
+| Technique 技术 | Why 原因 |
+|---|---|
+| **Pre-load once** 一次加载 | All 500 PNGs read into `_raw_poses` / `_raw_anims` dicts at startup · 启动时一次性读入内存 |
+| **Scale on demand** 按需缩放 | `QPixmap.scaledToHeight()` called per-frame with current `pet_h`; result cached · 每帧按当前高度缩放，结果缓存 |
+| **Cache invalidation** 缓存失效 | `set_size()` clears `_pose_cache` and `_frame_cache` → next display rescales cleanly · 改大小时清空缓存 |
+| **12fps timer** 定时器 | `QTimer(interval=80ms)` drives animation loop; consistent across all states · 80ms 间隔统一驱动所有动画 |
+
+---
+
+### 3. State Machine Architecture · 状态机架构
+
+A **9-state string-driven state machine** with interrupt-safe transitions. The `set_state()` method resets `frame_i` and calls `apply_state_frame()`, which dispatches to the correct renderer based on `self.state`.
+
+**9 状态字符串驱动状态机**，支持可中断转换。`set_state()` 重置帧计数并调用 `apply_state_frame()` 按状态分发渲染。
+
+```
+                    ┌──────────────────────────────────────────┐
+                    │              tick() loop (80ms)           │
+                    │  dispatches per-state frame advancement  │
+                    │  and physics (walk/run position update)  │
+                    └──────────────────────────────────────────┘
+                                         │
+         ┌───────────────────────────────┼───────────────────────────────┐
+         ▼                               ▼                               ▼
+    ┌─────────┐                    ┌──────────┐                    ┌──────────┐
+    │  idle   │ ◄──────────────────│   turn   │───────────────────▶│  spin    │
+    │  sit    │    turn_to()       │ (108-frm │  turn_to()          │ (120 frm) │
+    │  drag   │    finishes        │  wheel)  │  finishes           │           │
+    └────┬────┘                    └────┬─────┘                    └──────────┘
+         │                              │
+         │ walk/run targets             │ callback chaining:
+         ▼                              │ turn_to(0, done=self._launch_walk)
+    ┌─────────┐                         │ turn_to(0, done=self.start_spin)
+    │  walk   │                         │ turn_to(0, done=self._pose_sit)
+    │  run    │                         │
+    └────┬────┘                    ┌──────────┐
+         │                        │   hop    │ (vocal gesture, chain-barks)
+         │ finish_walk/run        │  lounge  │ (window edge tracking)
+         ▼                        └──────────┘
+    ┌─────────┐
+    │  idle   │
+    └─────────┘
+```
+
+**Interruption safety · 中断安全**: `turn_to()` always computes the new path from `current_rot_pos()` — which reads from the currently-displayed frame even mid-animation. A user-triggered action during a turn simply abandons the old path and starts fresh from the current angle.
+
+---
+
+### 4. Nearest-Path Rotation · 就近路径旋转
+
+Phoebe's 4 cardinal directions (front / left / back / right) are mapped to specific frames on a **108-frame 360° rotation video**:
+
+菲比 4 个朝向对应 **108 帧 360° 旋转视频**上的特定位置：
+
+```python
+SPIN_KEY = [0, 76, 50, 20]   # front / left / back / right positions on spin wheel
+SPIN_CYCLE = 108              # total frames in full rotation
+```
+
+| Direction 朝向 | Spin Wheel Position 旋转帧位置 |
+|---|---|
+| Front 正面 (0) | Frame 0 |
+| Left 左侧 (1) | Frame 76 |
+| Back 背面 (2) | Frame 50 |
+| Right 右侧 (3) | Frame 20 |
+
+```python
+def turn_to(self, q_to: int, done=None):
+    pos = self.current_rot_pos()          # current angle on wheel
+    b = SPIN_KEY[q_to]                    # target angle
+    fwd = (b - pos) % SPIN_CYCLE          # distance going forward
+    back = (pos - b) % SPIN_CYCLE         # distance going backward
+
+    # Near 180°: randomize direction to avoid predictable bias
+    if abs(fwd - back) <= 12:
+        go_fwd = random.random() < 0.5
+    else:
+        go_fwd = fwd < back               # pick shorter path
+
+    # Build frame sequence with TURN_STEP=2 (skip every other frame)
+    seq = range(pos, pos + fwd + 1, TURN_STEP) if go_fwd else \
+          range(pos, pos - back - 1, -TURN_STEP)
+    self.turn_seq = [i % SPIN_CYCLE for i in seq]
+```
+
+**Why 180° randomization**: Without it, a command to turn 180° would always go the same way — looking robotic. The random choice (±12 frame tolerance) adds natural variability.
+
+---
+
+### 5. Follow-Mouse Anti-Oscillation · 四层防抖跟随
+
+The follow-mouse system runs at **200ms intervals**, with **4 layers of oscillation prevention**:
+
+跟随系统每 **200ms 计算一次**，**四层防护**杜绝抖动：
+
+| Layer 层 | Mechanism 机制 | Code 代码 |
+|---|---|---|
+| **L1 — Arrival** 到达 | `dist < 45px` → stop walking, turn to face cursor · 距离 <45px 停下转身 | `if dist < 45: _follow_finish_turn(); return` |
+| **L2 — Axis lock** 轴向锁定 | `abs(dx) < 30px` → pure vertical mode, `vx=0` · 横轴接近时锁死不水平移动 | `if abs(dx) < 30: dx = 0; dist = abs(dy)` |
+| **L3 — Speed damping** 比例降速 | `dist < 120px` → `speed *= max(0.35, dist/120)` · 越近越慢 | `if dist < 120: speed *= max(0.35, dist / 120)` |
+| **L4 — Linked vx/vy** 联动速度 | `vx` from distance, `vy` from triangle similarity: `vy = dy * abs(vx) / dx` clamped to `speed*0.55` · 横纵速度联动 | Raw vy from geometry, capped at `speed * 0.55` |
+
+**Why Layer 2 is critical**: At close range, the cursor jitters by ±5px naturally. Without axis locking, this tiny horizontal jitter would keep flipping `vx` sign, causing Phoebe to shake left-right. Locking `dx=0` at close range eliminates this entirely.
+
+---
+
+### 6. Hat Physics Simulation · 帽子抛物线物理
+
+The hat flies as a **gravity-driven parabolic projectile** in its own frameless transparent window:
+
+帽子作为**独立透明窗口中的重力抛物线物体**飞行：
+
+```python
+HAT_GRAVITY = 2.0          # pixel/frame² downward acceleration
+
+def launch(self, start_x, start_y, target_x, target_y):
+    dx = target_x - start_x
+    dy = target_y - start_y
+
+    # Horizontal offset constraint: minimum 150px to avoid landing on Phoebe
+    if abs(dx) < 150:
+        target_x = start_x + (150 + random.randint(0, 80)) * sign(dx)
+        dx = target_x - start_x
+
+    # Solve for initial velocity given target flight time
+    total_frames = max(6, min(22, int(abs(dx) / 12.0)))
+    self.vx = dx / total_frames
+    self.vy = (dy - 0.5 * HAT_GRAVITY * total_frames²) / total_frames
+
+    # Ensure visible arc: if vy is too flat, extend flight time
+    while self.vy > -3.0 and total_frames < 45:
+        total_frames += 4
+        self.vx = dx / total_frames
+        self.vy = (dy - 0.5 * HAT_GRAVITY * total_frames²) / total_frames
+```
+
+```python
+# Per-frame tick: apply gravity
+def tick(self):
+    if self.flying:
+        self.fx += self.vx
+        self.fy += self.vy
+        self.vy += HAT_GRAVITY    # gravity accelerates downward each frame
+```
+
+**Hat reattachment · 帽子戴回**: `_try_reattach_hat()` checks if the hat's center is within `pet_h * 0.55` pixels of Phoebe's head (at `pet_h * 0.2` from top). Dragging the hat after it lands snaps it back instantly.
+
+**Auto-cleanup · 自动消失**: After `HAT_FADE_AFTER=35s`, `start_fade()` reduces window opacity 1→0 over 3 seconds, then hides the hat widget.
+
+---
+
+### 7. Window Lounging with DPI Mapping · 窗口吸附与 DPI 映射
+
+The lounge system uses **Win32 API** to enumerate all visible windows and detect edges. The challenge: Qt uses **logical coordinates** but Win32 returns **physical pixels** — they differ on high-DPI displays.
+
+悠闲坐窗系统用 **Win32 API** 枚举所有可见窗口检测边缘。核心挑战：Qt 用**逻辑坐标**，Win32 返回**物理像素**——高 DPI 下二者不同。
+
+```
+EnumWindows callback ──for each visible window──▶
+  ├─ GetWindowRect(hwnd) → physical rect
+  ├─ Skip: too small (<80×40), not visible, self window, or fullscreen (>95% screen)
+  ├─ Check vertical: abs(Phoebe.bottom - window.top) < SNAP_RANGE(200)
+  ├─ Check horizontal: Phoebe.center_x within window.left-200 .. window.right+200
+  └─ Track best candidate (closest top edge)
+       ↓
+  DPI mapping:  phy→log:  log_x = phy_x * scale + offset_x
+       ↓
+  Snap position:  Phoebe.y = window_top_logical - Phoebe.height + 25
+       ↓
+  Lounge timer (50ms):
+    ├─ IsWindow(hwnd) still valid?
+    ├─ GetWindowRect(hwnd) → re-map position
+    ├─ Fullscreen/maximized? → exit lounge
+    └─ Move Phoebe to track window
+```
+
+```python
+# DPI mapping parameters (per-frame recalculation)
+phy_h = max(my.bottom - my.top, 1)
+scale = self.height() / phy_h
+offset_x = self.x() - scale * my.left
+offset_y = self.y() - scale * my.top
+
+def phy_to_log_x(px): return int(px * scale + offset_x)
+def phy_to_log_y(py): return int(py * scale + offset_y)
+```
+
+**Why DPI mapping matters**: On a 4K monitor at 150% scaling, a window at physical position (3000, 200) maps to logical position (2000, 133). Without the mapping, Phoebe would sit in mid-air or inside the window.
+
+---
+
+### 8. Sound System: Echo Chaining & Cooldown · 声音系统：回响链与冷却
+
+A **unified sound pool** with frequency control, echo chaining, and quiet mode:
+
+**统一声音池** + 频率控制 + 回声链 + 安静模式：
+
+```
+                     play_sound(chance, force)
+                            │
+                   ┌────────▼────────┐
+                   │  Cooldown check  │  8s normal / 26s quiet ÷ sound_freq
+                   │  Probability     │  chance × freq × (0.4 if quiet)
+                   └────────┬────────┘
+                            │ pass
+                   ┌────────▼────────┐
+                   │  Pool selection  │  hatless + 40% → egg pool
+                   │  _play(path)     │  else → all pool
+                   └────────┬────────┘
+                            │
+                   ┌────────▼────────┐
+                   │  QMediaPlayer    │  volume: 85 (normal) / 32 (quiet)
+                   │  setMedia(QUrl)  │
+                   └────────┬────────┘
+                            │ EndOfMedia signal
+                   ┌────────▼────────┐
+                   │  Echo chain      │  22% chance → 700-1800ms delay → play again
+                   │  (once only)     │
+                   └─────────────────┘
+```
+
+**Sound pools · 声音池**:
+- `sounds_all`: 12 general voice lines · 12 个普通叫声
+- `sounds_egg`: "Fei Ba Jiu Bi" Easter egg lines · "菲八啾比"彩蛋系列
+- Hatless state: 40% egg pool chance (more dramatic reactions)
+- Greeting: `菲比啾比.mp3` after 800ms delay on launch
+
+**Hop chaining · 小跳连叫**: During `hop` state, each completed vocal triggers `_hop_bark()` with a 250-600ms random delay — creating a rhythmic "bark-bark-bark" sequence that ends when the animation finishes.
+
+---
+
+### 9. Triple-Click Detection · 三连击检测
+
+Qt's built-in `mouseDoubleClickEvent` is unreliable at 80ms frame intervals and can't detect triple clicks. **Custom click counting** solves this:
+
+Qt 内置 `mouseDoubleClickEvent` 在 80ms 帧间隔下不可靠且无法检测三连击。**手动计时计次**解决：
+
+```python
+def mousePressEvent(self, e):
+    if e.button() == Qt.LeftButton:
+        now = time.monotonic()
+        if now - self._last_click_time < 0.5:    # 500ms window
+            self._click_count += 1                # accumulate
+        else:
+            self._click_count = 1                 # reset
+
+        if self._click_count == 2:
+            self.double_bark()                    # 2 clicks → bark
+
+        if self._click_count >= 3 and self._can_knock_hat():
+            self._click_count = 0                 # 3 clicks → hat off!
+            self.knock_hat_off()
+
+        if self._click_count == 1:
+            self.drag_offset = ...                # first click → prepare drag
+```
+
+**Why not use Qt double-click**: Qt fires `mouseDoubleClickEvent` after `mousePressEvent`, causing one extra press event before the double-click handler. For rapid triple clicks within 500ms, Qt's internal timer mismatches with our 80ms animation loop, leading to missed clicks. Manual counting with `time.monotonic()` is deterministic and frame-rate independent.
+
+---
+
+### 10. Image Matting Pipeline · 抠图管线
+
+All 500 assets were generated from raw video frames and static screenshots via `tools/matting.py`. The core challenge: **Phoebe wears white clothes against a near-white background** — simple color-keying would erase parts of her outfit.
+
+全部 500 个素材由 `tools/matting.py` 从原始视频帧和截图中生成。核心难点：**白色衣服 + 白色背景**——简单色键抠图会吃掉衣服。
+
+```
+Source image (BGR, ~229-254 white-ish background)
+        │
+        ▼
+┌─ Step 1: Exposure normalization ─────────────────────────────┐
+│  bg_level() samples 6px border → median min-channel          │
+│  gain = 255 / bg_level  →  video frames brightened to 255   │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ Step 2: Barrier detection ──────────────────────────────────┐
+│  channel_diff = max(R,G,B) - min(R,G,B)                     │
+│  barrier = channel_diff > 22  → colored pixels (eyes, hair) │
+│  These pixels CANNOT be flooded — they form the "wall"      │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ Step 3: Flood-fill from edges ─────────────────────────────┐
+│  Seeds: every 24px along all 4 borders                      │
+│  Condition: pixel.channel_diff ≤ 18 AND brightness ≥ 180    │
+│  Flood: adjacent pixel diff ≤ 8 (per-channel tolerance)     │
+│  Result: flood_mask (255=background, 0=foreground)          │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ Step 4: Denoising ─────────────────────────────────────────┐
+│  connectedComponentsWithStats → largest blob = character    │
+│  Delete blobs < 1% of largest area (stray noise pixels)    │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ Step 5: Edge refinement ───────────────────────────────────┐
+│  cv2.erode(3×3) → remove 1px white fringe                   │
+│  cv2.GaussianBlur(3×3) → feather edges, eliminate aliasing │
+└──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ Step 6: Canvas normalization ──────────────────────────────┐
+│  Scale to CHAR_H=440px uniform height                       │
+│  Bottom-align on CANVAS_H=480 canvas                        │
+│  Output: BGRA PNG with clean alpha channel                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Key insight · 核心洞察**: The character's dark outlines (ink/shadows) have high channel variance (>22), while the near-white background has low variance (≤18). The flood-fill from edges crawls through the background but **stops at the outline** — the barrier pixels form an impassable wall. This is why the white dress survives the process: it's fully enclosed by the dark outline.
+
+---
+
+### 11. Asset Obfuscation · 素材隐藏
+
+To keep the GitHub repo clean, all 500 individual asset files are bundled into a single `data.pak` (a zip with `.pak` extension):
+
+为了保持仓库简洁，500 个独立素材文件打包为单个 `data.pak`（换后缀的 zip 文件）：
+
+```python
+# At startup: extract once to temp, skip on subsequent runs
+_PAK = os.path.join(BASE, "data.pak")
+if os.path.isfile(_PAK):
+    _PAK_TEMP = os.path.join(tempfile.gettempdir(), "phoebe_pet_assets")
+    if not os.path.isdir(_PAK_TEMP) or not os.path.isdir(os.path.join(_PAK_TEMP, "poses")):
+        os.makedirs(_PAK_TEMP)
+        with zipfile.ZipFile(_PAK, "r") as zf:
+            zf.extractall(_PAK_TEMP)         # 500 files → ~2s one-time cost
+    ASSETS = _PAK_TEMP                        # redirect all file I/O to temp dir
+
+# On exit: cleanup temp directory
+# closeEvent → shutil.rmtree(phoebe_pet_assets, ignore_errors=True)
+```
+
+**Design decisions · 设计取舍**:
+- **Extract to temp vs. in-memory**: `QMediaPlayer` requires file paths for MP3 playback, and `os.listdir()` is used to discover animation frame files → temp extraction is the only zero-code-change solution
+- **Re-extract strategy**: Checks for `poses/` subdirectory existence → only extracts on first run; subsequent launches are instant
+- **Cleanup**: Temp directory is removed on normal exit (`closeEvent`). OS temp cleanup handles crash scenarios
 
 ---
 
