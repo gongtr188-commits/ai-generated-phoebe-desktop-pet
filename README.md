@@ -124,7 +124,7 @@ Any time, any pose — double-click to make her bark. Small chance of the rare "
 
 ### 5. Auto-Start with Windows · 开机自启
 
-Create a shortcut to `start_phoebe.bat` (or the EXE) in your Startup folder:
+Create a shortcut to `启动菲比.bat` (or the EXE) in your Startup folder:
 
 ```
 C:\Users\<YourName>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
@@ -237,7 +237,7 @@ Phoebe runs a **9-state animation machine** driven by PyQt5 timers:
 2. Press `Win+R`, type `shell:startup`, press Enter · 按 Win+R，输入 shell:startup，回车
 3. Move the shortcut into that folder · 把快捷方式拖进去
 
-Now Phoebe launches every time you turn on your computer.
+Now Phoebe launches every time you turn on your computer. · 这样菲比就会随系统开机自动启动。
 </details>
 
 ---
@@ -259,7 +259,7 @@ pip install PyQt5
 python phoebe_pet.py
 
 #    Or just double-click:  或者直接双击：
-start_phoebe.bat
+启动菲比.bat
 ```
 
 ---
@@ -279,7 +279,7 @@ start_phoebe.bat
 
 ```
 phoebe_pet.py          # Main application (~1440 lines) · 主程序
-start_phoebe.bat       # Quick launch script · 一键启动脚本
+启动菲比.bat           # Quick launch script · 一键启动脚本
 data.pak               # Bundled assets (zip format, 500 files) · 素材打包
 README.md              # You are here · 当前文件
 preview.png            # Preview image · 预览图
@@ -333,7 +333,9 @@ self.setWindowFlags(
 self.setAttribute(Qt.WA_TranslucentBackground)  # Alpha channel passthrough · 透明穿透
 ```
 
-**Why these specific flags**: `SubWindow` prevents a taskbar entry (the pet isn't an "app"). `WindowDoesNotAcceptFocus` ensures clicking Phoebe never steals focus from your actual work. The `WA_TranslucentBackground` attribute tells Qt to respect the PNG alpha channel rather than painting a solid color behind pixels.
+**Why these specific flags · 为什么选这些标志位**: `SubWindow` prevents a taskbar entry (the pet isn't an "app"). `WindowDoesNotAcceptFocus` ensures clicking Phoebe never steals focus from your actual work. The `WA_TranslucentBackground` attribute tells Qt to respect the PNG alpha channel rather than painting a solid color behind pixels.
+
+`SubWindow` 避免任务栏出现图标（宠物不是"应用"）。`WindowDoesNotAcceptFocus` 确保点击菲比不会抢走你当前窗口的焦点。`WA_TranslucentBackground` 让 Qt 尊重 PNG 的 Alpha 通道，不在像素后面画实色背景。
 
 ---
 
@@ -402,6 +404,8 @@ A **9-state string-driven state machine** with interrupt-safe transitions. The `
 
 **Interruption safety · 中断安全**: `turn_to()` always computes the new path from `current_rot_pos()` — which reads from the currently-displayed frame even mid-animation. A user-triggered action during a turn simply abandons the old path and starts fresh from the current angle.
 
+`turn_to()` 始终从 `current_rot_pos()` 读取当前正在显示的帧号来计算新路径——即使在动画中途。用户在转身时触发新动作，直接放弃旧路径、从当前角度重新规划。
+
 ---
 
 ### 4. Nearest-Path Rotation · 就近路径旋转
@@ -441,7 +445,9 @@ def turn_to(self, q_to: int, done=None):
     self.turn_seq = [i % SPIN_CYCLE for i in seq]
 ```
 
-**Why 180° randomization**: Without it, a command to turn 180° would always go the same way — looking robotic. The random choice (±12 frame tolerance) adds natural variability.
+**Why 180° randomization · 为什么 180° 要随机**: Without it, a command to turn 180° would always go the same way — looking robotic. The random choice (±12 frame tolerance) adds natural variability.
+
+不加随机的话，每次 180° 转身都走同一边——看起来很机械。±12 帧容差内的随机选择让转身方向更自然。
 
 ---
 
@@ -458,7 +464,9 @@ The follow-mouse system runs at **200ms intervals**, with **4 layers of oscillat
 | **L3 — Speed damping** 比例降速 | `dist < 120px` → `speed *= max(0.35, dist/120)` · 越近越慢 | `if dist < 120: speed *= max(0.35, dist / 120)` |
 | **L4 — Linked vx/vy** 联动速度 | `vx` from distance, `vy` from triangle similarity: `vy = dy * abs(vx) / dx` clamped to `speed*0.55` · 横纵速度联动 | Raw vy from geometry, capped at `speed * 0.55` |
 
-**Why Layer 2 is critical**: At close range, the cursor jitters by ±5px naturally. Without axis locking, this tiny horizontal jitter would keep flipping `vx` sign, causing Phoebe to shake left-right. Locking `dx=0` at close range eliminates this entirely.
+**Why Layer 2 is critical · 为什么 L2 最关键**: At close range, the cursor jitters by ±5px naturally. Without axis locking, this tiny horizontal jitter would keep flipping `vx` sign, causing Phoebe to shake left-right. Locking `dx=0` at close range eliminates this entirely.
+
+近距离时光标本身会自然抖动 ±5px。不做轴向锁定的话，这点微小水平偏移就会反复翻转 `vx` 的正负号，导致菲比左右抽搐。把 `dx=0` 锁死就从根源上消灭了这个问题。
 
 ---
 
@@ -503,7 +511,11 @@ def tick(self):
 
 **Hat reattachment · 帽子戴回**: `_try_reattach_hat()` checks if the hat's center is within `pet_h * 0.55` pixels of Phoebe's head (at `pet_h * 0.2` from top). Dragging the hat after it lands snaps it back instantly.
 
+`_try_reattach_hat()` 检测帽子中心是否距菲比头顶（距顶部 `pet_h * 0.2` 处）在 `pet_h * 0.55` 像素以内。落地后把帽子拖回头部附近立刻戴回。
+
 **Auto-cleanup · 自动消失**: After `HAT_FADE_AFTER=35s`, `start_fade()` reduces window opacity 1→0 over 3 seconds, then hides the hat widget.
+
+`HAT_FADE_AFTER=35s` 后 `start_fade()` 在 3 秒内将窗口透明度从 1 降到 0，然后隐藏帽子窗口。
 
 ---
 
@@ -543,7 +555,9 @@ def phy_to_log_x(px): return int(px * scale + offset_x)
 def phy_to_log_y(py): return int(py * scale + offset_y)
 ```
 
-**Why DPI mapping matters**: On a 4K monitor at 150% scaling, a window at physical position (3000, 200) maps to logical position (2000, 133). Without the mapping, Phoebe would sit in mid-air or inside the window.
+**Why DPI mapping matters · 为什么 DPI 映射很重要**: On a 4K monitor at 150% scaling, a window at physical position (3000, 200) maps to logical position (2000, 133). Without the mapping, Phoebe would sit in mid-air or inside the window.
+
+4K 显示器 150% 缩放下，物理坐标 (3000, 200) 的窗口对应逻辑坐标 (2000, 133)。不做映射的话，菲比会悬在半空或坐到窗口里面。
 
 ---
 
@@ -580,10 +594,12 @@ A **unified sound pool** with frequency control, echo chaining, and quiet mode:
 **Sound pools · 声音池**:
 - `sounds_all`: 12 general voice lines · 12 个普通叫声
 - `sounds_egg`: "Fei Ba Jiu Bi" Easter egg lines · "菲八啾比"彩蛋系列
-- Hatless state: 40% egg pool chance (more dramatic reactions)
-- Greeting: `菲比啾比.mp3` after 800ms delay on launch
+- Hatless state: 40% egg pool chance (more dramatic reactions) · 无帽状态 40% 彩蛋概率（反应更夸张）
+- Greeting: `菲比啾比.mp3` after 800ms delay on launch · 启动 0.8 秒后播放出场问候
 
 **Hop chaining · 小跳连叫**: During `hop` state, each completed vocal triggers `_hop_bark()` with a 250-600ms random delay — creating a rhythmic "bark-bark-bark" sequence that ends when the animation finishes.
+
+小跳状态下，每声叫完触发 `_hop_bark()`，随机延迟 250-600ms 后再叫——形成有节奏的"叫-叫-叫"序列，动画结束即停。
 
 ---
 
@@ -613,7 +629,9 @@ def mousePressEvent(self, e):
             self.drag_offset = ...                # first click → prepare drag
 ```
 
-**Why not use Qt double-click**: Qt fires `mouseDoubleClickEvent` after `mousePressEvent`, causing one extra press event before the double-click handler. For rapid triple clicks within 500ms, Qt's internal timer mismatches with our 80ms animation loop, leading to missed clicks. Manual counting with `time.monotonic()` is deterministic and frame-rate independent.
+**Why not use Qt double-click · 为什么不用 Qt 双击**: Qt fires `mouseDoubleClickEvent` after `mousePressEvent`, causing one extra press event before the double-click handler. For rapid triple clicks within 500ms, Qt's internal timer mismatches with our 80ms animation loop, leading to missed clicks. Manual counting with `time.monotonic()` is deterministic and frame-rate independent.
+
+Qt 的 `mouseDoubleClickEvent` 在 `mousePressEvent` 之后才触发，导致双击处理器执行前多出一个额外 press 事件。500ms 内快速三连击时，Qt 内部计时器与 80ms 动画循环不同步，容易丢点击。用手动 `time.monotonic()` 计数是确定性方案，不受帧率影响。
 
 ---
 
@@ -669,6 +687,8 @@ Source image (BGR, ~229-254 white-ish background)
 
 **Key insight · 核心洞察**: The character's dark outlines (ink/shadows) have high channel variance (>22), while the near-white background has low variance (≤18). The flood-fill from edges crawls through the background but **stops at the outline** — the barrier pixels form an impassable wall. This is why the white dress survives the process: it's fully enclosed by the dark outline.
 
+角色的深色轮廓线（墨线/阴影）有很高的通道方差（>22），而近白色的背景方差很低（≤18）。从边缘开始的泛洪沿背景爬行，**遇到轮廓线就停**——屏障像素构成不可逾越的墙。这就是为什么白色裙子能完整保留：它被深色轮廓完全包裹住了。
+
 ---
 
 ### 11. Asset Obfuscation · 素材隐藏
@@ -693,9 +713,9 @@ if os.path.isfile(_PAK):
 ```
 
 **Design decisions · 设计取舍**:
-- **Extract to temp vs. in-memory**: `QMediaPlayer` requires file paths for MP3 playback, and `os.listdir()` is used to discover animation frame files → temp extraction is the only zero-code-change solution
-- **Re-extract strategy**: Checks for `poses/` subdirectory existence → only extracts on first run; subsequent launches are instant
-- **Cleanup**: Temp directory is removed on normal exit (`closeEvent`). OS temp cleanup handles crash scenarios
+- **Extract to temp vs. in-memory · 临时文件 vs 内存**: `QMediaPlayer` requires file paths for MP3 playback, and `os.listdir()` is used to discover animation frame files → temp extraction is the only zero-code-change solution. · `QMediaPlayer` 播 MP3 需要文件路径，`os.listdir()` 用来发现动画帧文件 → 临时解压是唯一无需改代码的方案
+- **Re-extract strategy · 重复解压策略**: Checks for `poses/` subdirectory existence → only extracts on first run; subsequent launches are instant. · 检查 `poses/` 子目录是否存在 → 仅首次解压，后续启动秒开
+- **Cleanup · 清理**: Temp directory is removed on normal exit (`closeEvent`). OS temp cleanup handles crash scenarios. · 正常退出时 `closeEvent` 删除临时目录。崩溃场景由系统临时文件清理兜底
 
 ---
 
