@@ -25,7 +25,7 @@
 - [📋 Right-Click Menu · 右键菜单详解](#-right-click-menu--右键菜单详解)
 - [⚙️ Settings & Customization · 设置与自定义](#️-settings--customization--设置与自定义)
 - [🧩 Animation States · 动画状态机](#-animation-states--动画状态机)
-- [🚀 Quick Start · 快速开始](#-quick-start--快速开始)
+- [🚀 Quick Start & Downloads · 快速开始与下载](#-quick-start--快速开始)
 - [📂 Project Structure · 项目结构](#-project-structure--项目结构)
 - [🛠️ Tech Stack · 技术栈](#️-tech-stack--技术栈)
 - [🔬 Technical Deep Dive · 技术实现详解](#-technical-deep-dive--技术实现详解)
@@ -209,32 +209,69 @@ Phoebe runs a **9-state animation machine** driven by PyQt5 timers:
 
 ## 🚀 Quick Start · 快速开始
 
-### Option A · 方式 A：Standalone EXE（零门槛）
+> **Most users → go with Option A.** No setup, no Python, just a few clicks.
+> **大多数用户 → 选方式 A**，无需安装任何东西，点几下就好。
 
-1. Download `PhoebeDesktopPet_v4.zip` from [Releases](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases)
-2. Extract and double-click the `.exe` file
-3. Phoebe appears at bottom-right of your screen — done!
+---
 
-无需安装 Python 或任何依赖，解压即用。
+### 🟢 Option A · Standalone EXE（推荐 · Recommended）
 
-### Option B · 方式 B：Python Source
+<p align="center"><b>🤏 Step-by-step · 跟着做</b></p>
+
+| Step | Action · 操作 | Screenshot / Detail · 图示 |
+|---|---|---|
+| **1** | Open the [**Releases page**](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) · 打开 [**Releases 页面**](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) | Scroll to the latest version (v4) · 滑到最新版本 |
+| **2** | Find the file ending with `…exe版.zip` and click it to download · 找到 `…exe版.zip` 文件，点一下下载 | It's the larger one (~133 MB) · 选体积大的那个 |
+| **3** | Once downloaded, **right-click the zip → "Extract All…"** (Windows has this built-in) · 下载完以后，**右键 → 全部解压缩** | Pick a folder you'll remember, like your Desktop · 解压到记得住的地方，比如桌面 |
+| **4** | Open the extracted folder, find `PhoebeDesktopPet_v4.exe` · 打开解压出来的文件夹，找到 exe 文件 | It has the Phoebe icon 🎀 · 图标是个粉色蝴蝶结 |
+| **5** | **Double-click to run** · **双击运行** | Windows might show a blue "Windows protected your PC" popup — click **"More info"** then **"Run anyway"**. This is normal for indie apps without a code-signing certificate. · Windows 可能弹出蓝色保护提示 → 点"更多信息" → "仍要运行"，这很正常 |
+| **6** | Phoebe appears at the bottom-right of your screen! 🎉 · 菲比出现在屏幕右下角啦！ | Right-click her for the menu; drag her to move · 右键打开菜单，左键拖拽挪位置 |
+
+> 💡 After extracting, you can **pin the EXE to your taskbar** or send a **shortcut to Desktop** for quick access next time.
+> 💡 解压后可以把 exe **固定到任务栏**，或**发送快捷方式到桌面**，下次直接点。
+
+<details>
+<summary>🔧 Want auto-start with Windows? · 想开机自启？</summary>
+
+1. Right-click `PhoebeDesktopPet_v4.exe` → **Create shortcut** · 右键 exe → 创建快捷方式
+2. Press `Win+R`, type `shell:startup`, press Enter · 按 Win+R，输入 shell:startup，回车
+3. Move the shortcut into that folder · 把快捷方式拖进去
+
+Now Phoebe launches every time you turn on your computer.
+</details>
+
+---
+
+### 🟡 Option B · Python Source（开发者/高级用户 · For developers）
 
 ```bash
-# 1. Install Python 3.8+ (https://www.python.org/downloads/)
-#    Check "Add Python to PATH" during installation
+# 1. Install Python 3.8+ from https://www.python.org/downloads/
+#    ✅ Check "Add Python to PATH" during installation
+#    ✅ 安装时务必勾选 "Add Python to PATH"
 
-# 2. Install PyQt5
+# 2. Open Command Prompt (Win+R → cmd) and run:
+#    打开命令提示符（Win+R → cmd），运行：
 pip install PyQt5
 
-# 3. Run!
+# 3. Download the source zip from Releases (the ~95 MB one),
+#    extract it, and run:
+#    从 Releases 下载源码包（~95 MB 那个），解压后运行：
 python phoebe_pet.py
+
+#    Or just double-click:  或者直接双击：
+start_phoebe.bat
 ```
 
-Or download the source zip from [Releases](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) and double-click `start_phoebe.bat`.
+---
 
-或从 [Releases](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) 下载源码包，双击 `启动菲比.bat`。
+## 📦 Downloads · 下载一览
 
-**Requirements · 运行要求**：Python 3.8+ · PyQt5 · Windows 7/10/11
+| 你适合哪个？ | 下载这个 | 大小 | 怎么用 |
+|---|---|---|---|
+| 😊 **我不会 Python / 我只想双击运行** | [⬇ `菲比桌面宠物_v4_exe版.zip`](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) | ~133 MB | 解压 → 双击 exe · Extract → double-click |
+| 🐍 **我会 Python / 我想看源码** | [⬇ `菲比桌面宠物_v4_python.zip`](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) | ~95 MB | 解压 → `pip install PyQt5` → `python phoebe_pet.py` |
+
+> ℹ️ **EXE requires**: Windows 7/10/11 only · **Python source requires**: Python 3.8+, PyQt5, Windows
 
 ---
 
@@ -723,15 +760,6 @@ This project was built entirely through **iterative AI-human dialog** — every 
 
 EXE 是 PyInstaller 打包的，内嵌 Python 解释器，部分杀软的启发式扫描会误报。不放心的可以下载源码包用 Python 直接跑。
 </details>
-
----
-
-## 📦 Downloads · 下载
-
-| Package 包 | Size 大小 | Description 说明 |
-|---|---|---|
-| [Python Source ZIP](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) | ~95 MB | Source code + `data.pak`. Requires Python + PyQt5. · 源码 + 素材包，需 Python 环境 |
-| [Standalone EXE ZIP](https://github.com/gongtr188-commits/ai-generated-phoebe-desktop-pet/releases) | ~133 MB | No dependencies. Extract and run. · 解压即用，无需任何依赖 |
 
 ---
 
