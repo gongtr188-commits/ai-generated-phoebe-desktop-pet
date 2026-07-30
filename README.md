@@ -16,6 +16,15 @@
   <img src="preview.png" alt="Phoebe Preview" width="650">
 </p>
 
+<p align="center">
+  <b>🎬 Demo · 演示视频</b><br>
+  <sub>Click the video below to watch Phoebe in action · 点击下方视频观看菲比实际效果</sub><br>
+  <a href="demo.mp4">
+    <img src="preview.png" alt="Watch Demo · 观看演示" width="500">
+  </a><br>
+  <sub>▶ <a href="demo.mp4"><b>Click to play · 点击播放</b></a></sub>
+</p>
+
 ---
 
 ## 📑 Table of Contents · 目录
@@ -281,6 +290,7 @@ python phoebe_pet.py
 phoebe_pet.py          # Main application (~1440 lines) · 主程序
 启动菲比.bat           # Quick launch script · 一键启动脚本
 data.pak               # Bundled assets (zip format, 500 files) · 素材打包
+demo.mp4               # Demo video · 演示视频
 README.md              # You are here · 当前文件
 preview.png            # Preview image · 预览图
 tools/
